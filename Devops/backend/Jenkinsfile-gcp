@@ -1,0 +1,99 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = 'techscrum'
+		JOB = 'Backend-CICD-GCP'
+		JOB_URL = 'http://34.129.229.29:8080/job/Backend-CICD-GCP'
+
+     GKE_DIR  ='k8s'
+        IMAGE_TAG="latest"
+		    SHA      = "${currentBuild.number}"
+		  PROJECT_ID = 'storied-yew-391502'
+    CLUSTER_NAME = 'my-cluster-12'
+    LOCATION = 'us-central1'
+    CREDENTIALS_ID = 'multi-k8s'
+       DOCKERHUB_CREDENTIALS = credentials('dockerID')
+   DOCKER_HUB_NAME ='jack2210'
+
+
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git(branch: 'main', credentialsId: 'jenkins_node', url: 'git@github.com:DevOpsTechscrum/DevOps-Techscrum.be.git')
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                    sh 'npm install'
+                    sh 'npm run build'
+                    sh 'npm run lint'
+                    sh 'docker builder prune -f'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                    sh 'npm run test'
+            }
+        }
+
+
+     		stage('Login') {
+      steps {
+           script {
+        sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
+      }
+          }
+    }
+
+
+        stage('Build Docker Image1') {
+            steps {
+                script {
+                 	sh """
+               docker --version
+                  docker build -t "${DOCKER_HUB_NAME}/${DOCKER_IMAGE}:${IMAGE_TAG}" -t "${DOCKER_HUB_NAME}/${DOCKER_IMAGE}:${SHA}" .
+                   """
+                }
+            }
+        } 
+
+
+	
+	
+	stage('Push') {
+      steps {
+           script {
+          sh 'docker push "${DOCKER_HUB_NAME}/${DOCKER_IMAGE}:${SHA}"  '
+                 sh 'docker push "${DOCKER_HUB_NAME}/${DOCKER_IMAGE}:${IMAGE_TAG}"  '
+      }
+
+          }
+    }
+
+
+
+     
+  stage('Deploy to GKE') {
+            steps{
+			   dir("$GKE_DIR") {
+           // dir('./backend/k8s/'){ 
+                sh "sed -i 's/${DOCKER_IMAGE}:latest/${DOCKER_IMAGE}:${SHA}/g' backend-deployment.yaml"
+                step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'backend-deployment.yaml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: true])
+				}
+            }
+        }
+
+
+    }
+   post {
+        failure {
+            emailext attachLog: true, body: "The pipeline ${JOB} has failed. Please check the Jenkins job at ${JOB_URL}", subject: "Failed Pipeline: ${JOB}", to: "devopstechscrum@outlook.com"
+        }
+    }
+}
